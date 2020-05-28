@@ -1,0 +1,3 @@
+# Metro Optimization (this time in Rust)
+
+Due to performance shortcomings of my previous metro optimization project in Python I decided to re-implement it in parts or whole in Rust. Not only should this offer me a significant performance boost, it will also help me learn more about Rust. And as an additional benefit I will be able to structure the project better than having a thousands of lines long notebook.
