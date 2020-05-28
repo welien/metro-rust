@@ -12,7 +12,7 @@ use crossbeam::crossbeam_channel::unbounded;
 pub struct Solution {
     path: Vec<usize>,
     cb: Option<usize>,
-    length: f32,
+    pub length: f32,
     avg_dist : f32,
     distances: Arc<Array2<f32>>
 }
@@ -56,6 +56,14 @@ impl Solution{
 
     fn total_length(&mut self) {
         // calculate total length
+        let mut total = 0.;
+        for i in 0..(self.path.len()-1) {
+            let x = self.path[i] as usize;
+            let y = self.path[i+1] as usize;
+            total += self.distances[(x, y)];
+        }
+        total += self.distances[(0,(self.path.len()-1))];
+        self.length = total;
     }
 }
 
@@ -74,9 +82,11 @@ impl Worker {
                 Message::NewJob(solution) => {
                     let mut solution = solution;
                     solution.total_length();
-                    sender.send(Message::NewJob(solution));
+                    println!("length is {}", solution.length);
+                    sender.send(Message::FinishedJob(solution)).unwrap();
                 }
                 Message::Terminate => {
+                    sender.send(Message::Terminate).unwrap();
                     break;
                 }
                 Message::FinishedJob(_) => {
@@ -132,14 +142,52 @@ impl ThreadPool {
 
     }
 
-    /*fn wait_for_evaluating(self) {
-        for worker in self.workers.iter_mut() {
-            if let Some(thread) = &worker.thread {
+    fn wait_for_evaluating(&mut self) {
+        for worker in &mut self.workers {
+            if let Some(thread) = worker.thread.take() {
                 thread.join().unwrap();
             }
             
         }
-    }*/
+    }
+
+    fn find_the_best(&self) -> Option<Solution> {
+        let mut counter_of_terminations = 0;
+        let n_workers = self.workers.len();
+        let mut best : Option<Solution> = None;
+
+        while counter_of_terminations != n_workers {
+            let message = self.receiver.recv().unwrap();
+
+            match message {
+                Message::FinishedJob(solution) => {
+                    match best {
+                        Option::None => {
+                            best = Some(solution);
+                        }
+                        Some(best_sol) => {
+                            if solution.length < best_sol.length {
+                                best = Some(solution);
+                            }
+                            else {
+                                // this was a close one
+                                // matching it equals implicitly moving it - must move it back
+                                best = Some(best_sol);
+                            }
+                        }
+                    }
+                }
+                Message::Terminate => {
+                    counter_of_terminations += 1;
+                }
+                Message::NewJob(_) => {
+                    println!("NewJob during aggregation: VERY STRANGE!");
+                    panic!();
+                }
+            }
+        }
+        best
+    }
 }
 
 enum Message{
@@ -154,14 +202,14 @@ pub struct Exhaustive{
 }
 
 impl Exhaustive {
-    fn new(stations : Vec<Station>) -> Exhaustive{
+    pub fn new(stations : Vec<Station>) -> Exhaustive{
         Exhaustive {
             best: Option::None,
             stations: stations
         }
     }
 
-    fn search(&mut self) -> Option<Solution> {
+    pub fn search(&mut self) -> Option<Solution> {
         // first create a vector that represents station indices
         let n_stations = self.stations.len();
         let station_indices = 0..n_stations;
@@ -178,14 +226,16 @@ impl Exhaustive {
         let distances = Arc::new(distances);
 
         // initialize thread pool for jobs
+        println!("Creating pool of workers.");
         let n_threads = 8;
-        let pool = ThreadPool::new(8);
+        let mut pool = ThreadPool::new(n_threads);
 
         // then create permutations of that vector
         let it = station_indices.into_iter().permutations(n_stations);
+        println!("Sending permutations to workers.");
         for p in it {
             // create a solution
-            let mut solution = Solution {
+            let solution = Solution {
                 path: p,
                 cb: None,
                 length: 0.,
@@ -199,10 +249,14 @@ impl Exhaustive {
         }
         
         // send termination message to all evaluators
+        println!("Finishing sending permutations.");
         pool.finish_sending();
-        //pool.wait_for_evaluating();
+        println!("Waiting for workers to finish their jobs.");
+        pool.wait_for_evaluating();
+        println!("Workers finished.");
         // collect results from evaluators
+        let best = pool.find_the_best();
         // return the best result
-        return Option::None
+        return best;
     }
 }
