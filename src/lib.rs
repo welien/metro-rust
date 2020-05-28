@@ -3,17 +3,18 @@ use ndarray::prelude::*;
 use std::fmt;
 use rand::Rng;
 use itertools::Itertools;
+use std::sync::Arc;
 
 use std::thread;
 use crossbeam;
 use crossbeam::crossbeam_channel::unbounded;
 
-pub struct Solution<'a> {
+pub struct Solution {
     path: Vec<usize>,
     cb: Option<usize>,
     length: f32,
     avg_dist : f32,
-    distances: &'a Array2<f32>
+    distances: Arc<Array2<f32>>
 }
 
 pub struct Station {
@@ -42,8 +43,8 @@ impl fmt::Display for Station {
     }
 }
 
-impl Solution <'_>{
-    fn new(path : Vec<usize>, cb : Option<usize>, distances : &Array2<f32>) -> Solution {
+impl Solution{
+    fn new(path : Vec<usize>, cb : Option<usize>, distances : Arc<Array2<f32>>) -> Solution {
         Solution {
             path,
             cb,
@@ -63,18 +64,24 @@ struct Worker {
     thread: Option<thread::JoinHandle<()>>
 }
 
-impl<'a> Worker {
-    fn new(id : usize, receiver : crossbeam::Receiver<Message<'static>>, sender : crossbeam::Sender<Message<'static>>) -> Worker{
+impl Worker {
+    fn new(id : usize, receiver : crossbeam::Receiver<Message>, sender : crossbeam::Sender<Message>) -> Worker{
         // spawn thread
         let thread = thread::spawn(move || loop {
             let message = receiver.recv().unwrap();
 
             match message {
                 Message::NewJob(solution) => {
+                    let mut solution = solution;
                     solution.total_length();
+                    sender.send(Message::NewJob(solution));
                 }
                 Message::Terminate => {
                     break;
+                }
+                Message::FinishedJob(_) => {
+                    println!("A finished job was submitted to a queue processing lengths!");
+                    panic!();
                 }
             }
         });
@@ -85,21 +92,21 @@ impl<'a> Worker {
     }
 }
 
-struct ThreadPool <'a>{
+struct ThreadPool{
     workers: Vec<Worker>,
-    sender: crossbeam::Sender<Message<'a>>,
-    receiver: crossbeam::Receiver<Message<'a>>
+    sender: crossbeam::Sender<Message>,
+    receiver: crossbeam::Receiver<Message>
 }
 
-impl<'a> ThreadPool<'a> {
-    fn new(size : usize) -> ThreadPool<'a>{
+impl ThreadPool {
+    fn new(size : usize) -> ThreadPool{
         let mut workers : Vec<Worker> = Vec::with_capacity(size);
 
         // create channels for sending jobs to threads
-        let (solutions_raw_sender, solutions_raw_receiver) = unbounded::<Message<'_>>();
+        let (solutions_raw_sender, solutions_raw_receiver) = unbounded::<Message>();
 
         // create channels for sending finished jobs back
-        let (solutions_evaluated_sender, solutions_evaluated_receiver) = unbounded::<Message<'_>>();
+        let (solutions_evaluated_sender, solutions_evaluated_receiver) = unbounded::<Message>();
 
         for i in 0..size {
             let worker = Worker::new(i, solutions_raw_receiver.clone(), solutions_evaluated_sender.clone());
@@ -113,7 +120,7 @@ impl<'a> ThreadPool<'a> {
         }
     }
 
-    fn send(&self, message : Message<'a>) {
+    fn send(&self, message : Message) {
         self.sender.send(message).unwrap();
     }
 
@@ -135,18 +142,19 @@ impl<'a> ThreadPool<'a> {
     }*/
 }
 
-enum Message <'a>{
-    NewJob(Solution<'a>),
+enum Message{
+    NewJob(Solution),
+    FinishedJob(Solution),
     Terminate
 }
 
-pub struct Exhaustive<'a>{
-    best: Option<Solution<'a>>,
+pub struct Exhaustive{
+    best: Option<Solution>,
     stations : Vec<Station>
 }
 
-impl<'a> Exhaustive<'_> {
-    fn new(stations : Vec<Station>) -> Exhaustive<'a>{
+impl Exhaustive {
+    fn new(stations : Vec<Station>) -> Exhaustive{
         Exhaustive {
             best: Option::None,
             stations: stations
@@ -167,6 +175,8 @@ impl<'a> Exhaustive<'_> {
             }
         }
 
+        let distances = Arc::new(distances);
+
         // initialize thread pool for jobs
         let n_threads = 8;
         let pool = ThreadPool::new(8);
@@ -175,12 +185,12 @@ impl<'a> Exhaustive<'_> {
         let it = station_indices.into_iter().permutations(n_stations);
         for p in it {
             // create a solution
-            let solution = Solution {
+            let mut solution = Solution {
                 path: p,
                 cb: None,
                 length: 0.,
                 avg_dist: 0.,
-                distances: &distances
+                distances: distances.clone()
             };
             // then give them as jobs to evaluators
             // send solution to the evaluating queue
