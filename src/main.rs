@@ -1,7 +1,4 @@
-use itertools::Itertools;
-
-extern crate ndarray;
-use ndarray::prelude::*;
+use std::time::{Duration, Instant};
 
 use metro::Station;
 use metro::Exhaustive;
@@ -21,7 +18,9 @@ fn main() {
         println!("{}", station)
     }
 
+    let time_start = Instant::now();
     let mut search_strategy = Exhaustive::new(stations);
     let best = search_strategy.search();
-    println!("Best path is {} units long.", best.unwrap().length);
+    let time_end = time_start.elapsed().as_millis();
+    println!("Best path is {} units long. Found in {} mseconds", best.unwrap().length, time_end);
 }

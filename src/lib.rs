@@ -75,23 +75,42 @@ struct Worker {
 impl Worker {
     fn new(id : usize, receiver : crossbeam::Receiver<Message>, sender : crossbeam::Sender<Message>) -> Worker{
         // spawn thread
-        let thread = thread::spawn(move || loop {
-            let message = receiver.recv().unwrap();
+        let thread = thread::spawn(move || {
 
-            match message {
-                Message::NewJob(solution) => {
-                    let mut solution = solution;
-                    solution.total_length();
-                    println!("length is {}", solution.length);
-                    sender.send(Message::FinishedJob(solution)).unwrap();
-                }
-                Message::Terminate => {
-                    sender.send(Message::Terminate).unwrap();
-                    break;
-                }
-                Message::FinishedJob(_) => {
-                    println!("A finished job was submitted to a queue processing lengths!");
-                    panic!();
+            let mut best : Option<Solution> = None;
+            loop {
+                let message = receiver.recv().unwrap();
+
+                match message {
+                    Message::NewJob(solution) => {
+                        let mut solution = solution;
+                        solution.total_length();
+                        // debugging
+                        //println!("length is {}", solution.length);
+                        //sender.send(Message::FinishedJob(solution)).unwrap();
+                        match best {
+                            None => {
+                                best = Some(solution);
+                            }
+                            Some(sol) => {
+                                if solution.length < sol.length {
+                                    best = Some(solution);
+                                } else {
+                                    // at this point solution should go out of scope and be deleted
+                                    best = Some(sol);
+                                }
+                            }
+                        }
+                    }
+                    Message::Terminate => {
+                        sender.send(Message::FinishedJob(best)).unwrap();
+                        sender.send(Message::Terminate).unwrap();
+                        break;
+                    }
+                    Message::FinishedJob(_) => {
+                        println!("A finished job was submitted to a queue processing lengths!");
+                        panic!();
+                    }
                 }
             }
         });
@@ -163,17 +182,22 @@ impl ThreadPool {
                 Message::FinishedJob(solution) => {
                     match best {
                         Option::None => {
-                            best = Some(solution);
+                            best = solution;
                         }
                         Some(best_sol) => {
-                            if solution.length < best_sol.length {
-                                best = Some(solution);
+                            if let Some(uh) = solution {
+                                if uh.length < best_sol.length {
+                                    best = Some(uh);
+                                }
+                                else {
+                                    // this was a close one
+                                    // matching it equals implicitly moving it - must move it back
+                                    best = Some(best_sol);
+                                }
+                            } else {
+                                best = None;
                             }
-                            else {
-                                // this was a close one
-                                // matching it equals implicitly moving it - must move it back
-                                best = Some(best_sol);
-                            }
+                            
                         }
                     }
                 }
@@ -192,7 +216,7 @@ impl ThreadPool {
 
 enum Message{
     NewJob(Solution),
-    FinishedJob(Solution),
+    FinishedJob(Option<Solution>),
     Terminate
 }
 
@@ -235,13 +259,7 @@ impl Exhaustive {
         println!("Sending permutations to workers.");
         for p in it {
             // create a solution
-            let solution = Solution {
-                path: p,
-                cb: None,
-                length: 0.,
-                avg_dist: 0.,
-                distances: distances.clone()
-            };
+            let solution = Solution::new(p, None, distances.clone());
             // then give them as jobs to evaluators
             // send solution to the evaluating queue
             pool.send(Message::NewJob(solution));
