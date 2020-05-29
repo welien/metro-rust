@@ -4,12 +4,12 @@ Due to performance shortcomings of my previous metro optimization project in Pyt
 
 # Benchmarks
 
-Permutations of 10 stations with 8 threads: 0.9 seconds
-Permutations of 10 stations with 4 threads: 0.87 seconds
+Permutations of 10 stations with 8 threads: 0.9 seconds  
+Permutations of 10 stations with 4 threads: 0.87 seconds  
 Permutations of 10 stations with 1 thread: 0.75 seconds
 
-Permutations of 11 stations with 8 threads: 9.1 seconds
-Permutations of 11 stations with 4 threads: 9.75 seconds
+Permutations of 11 stations with 8 threads: 9.1 seconds  
+Permutations of 11 stations with 4 threads: 9.75 seconds  
 Permutations of 11 stations with 1 thread: 8.31 seconds
 
 These benchmarks suggest that parallel evaluation doesn't improve performance - on the contrary they inflict a slight performance penalty. After a few experiments it was clear that the bottleneck is the permutations generating iterator. The program finishes almost immediately after all permutations are generated implying that gneration of a permutation takes at least as much time as it takes to evaluate it.
